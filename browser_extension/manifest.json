@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Personal OS — Active Tab Reporter",
+  "version": "1.0.0",
+  "description": "Reports the active browser tab's URL to Personal OS running locally, so it can enrich activity events with browser context.",
+  "permissions": ["tabs"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

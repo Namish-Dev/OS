@@ -48,6 +48,7 @@ class WindowsForegroundSensor(ForegroundSensor):
         return {
             "process": process_name,
             "window_title": window_title,
+            "window_class": self._get_window_class(hwnd),
             "hwnd": hwnd,
         }
 
@@ -67,6 +68,13 @@ class WindowsForegroundSensor(ForegroundSensor):
         _user32.GetWindowTextW(hwnd, buffer, length + 1)
 
         return buffer.value or None
+
+    @staticmethod
+    def _get_window_class(hwnd) -> str | None:
+        """Return the Win32 class so Explorer shell surfaces can be filtered."""
+        buffer = ctypes.create_unicode_buffer(256)
+        length = _user32.GetClassNameW(hwnd, buffer, len(buffer))
+        return buffer.value[:length] or None
 
     @staticmethod
     def _get_process_id(hwnd) -> int:

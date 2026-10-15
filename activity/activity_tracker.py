@@ -2,7 +2,7 @@
 Personal OS — Activity Tracker (main entry point).
 
 Runs the observation loop:
-    1. WindowsForegroundSensor detects the active window.
+    1. A platform-specific foreground sensor detects the active window.
     2. A short-lived candidate window must stay foreground for
        DEBOUNCE_SECONDS before it is treated as real activity.
        This filters out transient, sub-second foreground flickers
@@ -11,10 +11,10 @@ Runs the observation loop:
     3. ActivityEngine classifies, enriches, and stores the event.
 
 Architecture:
-    Windows sensor  →  debounce  →  activity engine  →  database
+    OS sensor  →  debounce  →  activity engine  →  database
 
-When we move to Linux, only step 1 changes. The debounce logic is
-platform-independent and stays as-is.
+The factory currently selects Windows or Hyprland/Linux. The debounce logic
+and activity engine remain platform-independent.
 """
 
 import sys
@@ -29,11 +29,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from database.database import create_database
 from core.activity_engine import ActivityEngine
-from sensors.windows.foreground_sensor import WindowsForegroundSensor
+from sensors.factory import create_foreground_sensor
 from sensors.browser.chrome_adapter import ChromeAdapter
 from sensors.browser.extension_adapter import ExtensionBrowserAdapter
 from sensors.browser.extension_server import start_server_in_background
 from sensors.browser.cascading_adapter import CascadingBrowserAdapter
+from sensors.vscode.extension_adapter import VSCodeExtensionAdapter
+from sensors.vscode.extension_server import start_server_in_background as start_vscode_server
+from sensors.linux.git_context import GitContextCollector
 
 
 # How long (seconds) a window must remain continuously foreground
@@ -45,6 +48,10 @@ DEBOUNCE_SECONDS = 1.5
 # window is actually measured with reasonable precision.
 POLL_INTERVAL_SECONDS = 0.3
 
+# Record a lightweight observation while the same window stays focused. This
+# makes elapsed time evidence-based instead of guessing from window switches.
+HEARTBEAT_SECONDS = 60
+
 # Windows whose process reports as "explorer.exe" but are not real
 # File Explorer windows (e.g. the Alt-Tab / Task View overlay) tend
 # to have an empty or whitespace-only title. Real Explorer windows
@@ -53,11 +60,17 @@ POLL_INTERVAL_SECONDS = 0.3
 _EXPLORER_PROCESS = "explorer.exe"
 
 
-def _is_noise_window(process_name: str | None, window_title: str | None) -> bool:
+def _is_noise_window(process_name: str | None, window_title: str | None, window_class: str | None = None) -> bool:
     """Return True for windows that should never be recorded."""
 
-    if process_name == _EXPLORER_PROCESS and not (window_title or "").strip():
-        return True
+    if process_name == _EXPLORER_PROCESS:
+        # Only these Win32 classes represent actual Explorer folder windows.
+        # Task switcher, desktop shell, and other Explorer-owned surfaces must
+        # not become fake file activity.
+        if window_class and window_class not in {"CabinetWClass", "ExploreWClass"}:
+            return True
+        if not (window_title or "").strip():
+            return True
 
     return False
 
@@ -67,14 +80,15 @@ def main():
     # Initialise the database (safe — only creates tables if missing)
     create_database()
 
-    # Platform-specific sensor
-    sensor = WindowsForegroundSensor()
+    # Platform-specific sensor, selected without importing another OS's APIs.
+    sensor = create_foreground_sensor()
 
     # Local server the Personal OS browser extension reports to.
     # Safe to call even if the extension is never installed — it
     # just sits idle, and browser context falls back to CDP or
     # page-title-only as before.
     start_server_in_background()
+    start_vscode_server()
 
     # Browser context, in priority order:
     #   1. Extension  — works against the user's normal, already-open
@@ -90,7 +104,11 @@ def main():
     )
 
     # Central engine — platform-independent
-    engine = ActivityEngine(browser_adapters=[chrome])
+    engine = ActivityEngine(
+        browser_adapters=[chrome],
+        vscode_adapter=VSCodeExtensionAdapter(),
+        git_collector=GitContextCollector(),
+    )
 
     print("Personal OS Activity Tracker")
     print("=" * 60)
@@ -99,6 +117,7 @@ def main():
 
     committed_hwnd = None
     committed_title = None
+    last_recorded_at = None
 
     # The window currently being "timed" — not yet committed as a
     # real event because it hasn't stayed foreground long enough.
@@ -113,7 +132,7 @@ def main():
 
             if observation:
 
-                hwnd = observation.get("hwnd")
+                hwnd = observation.get("hwnd") or observation.get("window_id")
                 window_title = observation["window_title"]
                 process_name = observation["process"]
 
@@ -121,8 +140,23 @@ def main():
                     hwnd == committed_hwnd and window_title == committed_title
                 )
 
-                if already_committed or _is_noise_window(process_name, window_title):
+                if _is_noise_window(process_name, window_title, observation.get("window_class")):
                     candidate = None
+
+                elif already_committed:
+                    candidate = None
+
+                    if (
+                        last_recorded_at is None
+                        or now - last_recorded_at >= HEARTBEAT_SECONDS
+                    ):
+                        event = engine.process_observation(
+                            process_name,
+                            window_title,
+                            observation.get("context"),
+                        )
+                        print(event)
+                        last_recorded_at = now
 
                 elif candidate and candidate["hwnd"] == hwnd and candidate["title"] == window_title:
 
@@ -133,12 +167,14 @@ def main():
                         event = engine.process_observation(
                             process_name,
                             window_title,
+                            observation.get("context"),
                         )
 
                         print(event)
 
                         committed_hwnd = hwnd
                         committed_title = window_title
+                        last_recorded_at = now
                         candidate = None
 
                 else:
@@ -153,6 +189,9 @@ def main():
 
             else:
                 candidate = None
+                committed_hwnd = None
+                committed_title = None
+                last_recorded_at = None
 
             time.sleep(POLL_INTERVAL_SECONDS)
 

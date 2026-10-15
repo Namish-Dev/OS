@@ -1,0 +1,11 @@
+{
+  "name": "personal-os-context",
+  "displayName": "Personal OS Context",
+  "version": "0.1.0",
+  "publisher": "personal-os-local",
+  "description": "Reports minimal active VS Code context to a local Personal OS tracker.",
+  "engines": { "vscode": "^1.85.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "extension.js",
+  "categories": ["Other"]
+}

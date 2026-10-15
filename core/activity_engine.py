@@ -45,7 +45,7 @@ class ActivityEngine:
         # → ActivityEvent with url, domain, page_title
     """
 
-    def __init__(self, browser_adapters=None):
+    def __init__(self, browser_adapters=None, vscode_adapter=None, git_collector=None):
         """
         Args:
             browser_adapters: Optional list of BrowserAdapter instances.
@@ -53,6 +53,8 @@ class ActivityEngine:
         """
 
         self._browser_adapters = browser_adapters or []
+        self._vscode_adapter = vscode_adapter
+        self._git_collector = git_collector
 
         # Build a lookup: process_name → adapter
         self._adapter_map: dict = {}
@@ -65,6 +67,7 @@ class ActivityEngine:
         self,
         process_name: str | None,
         window_title: str | None,
+        sensor_context: dict | None = None,
     ) -> ActivityEvent:
         """
         Create an enriched ActivityEvent from a raw observation.
@@ -85,6 +88,13 @@ class ActivityEngine:
         context = self._build_context(
             application, process_name, window_title
         )
+
+        # The OS sensor may provide facts unavailable from a title alone
+        # (for example the current Hyprland workspace).  Application-specific
+        # parsing remains more precise where it has a concrete value.
+        for key, value in (sensor_context or {}).items():
+            if value is not None and context.get(key) is None:
+                context[key] = value
 
         event = ActivityEvent.create(
             application=application,
@@ -117,7 +127,22 @@ class ActivityEngine:
         """
 
         if application == "Visual Studio Code":
-            return parse_vscode_title(window_title)
+            context = parse_vscode_title(window_title)
+            if self._vscode_adapter:
+                try:
+                    extension_context = self._vscode_adapter.get_context()
+                except Exception:
+                    extension_context = {}
+                for key, value in extension_context.items():
+                    if value is not None:
+                        context[key] = value
+            if self._git_collector and context.get("workspace_path"):
+                try:
+                    context.update(self._git_collector.collect(context["workspace_path"]))
+                except Exception:
+                    # Project enrichment must not prevent raw activity capture.
+                    pass
+            return context
 
         if application == "Antigravity":
             return parse_antigravity_title(window_title)
@@ -163,7 +188,24 @@ class ActivityEngine:
             tab = adapter.find_active_tab(window_title)
 
             if tab:
-                return tab   # Has page_title, url, domain
+                # Normalize partial extension/CDP payloads. A malformed or
+                # stale response must not erase the reliable title fallback.
+                normalized = dict(basic_context)
+                normalized.update({key: value for key, value in tab.items() if value is not None})
+                # Extension events can arrive while YouTube (and some SPAs)
+                # still expose a generic title. The foreground window title
+                # is more specific in that case, so retain it while keeping
+                # the extension's reliable URL and domain.
+                generic_titles = {"youtube", "google chrome", "new tab", "localhost"}
+                if (
+                    str(normalized.get("page_title") or "").strip().lower() in generic_titles
+                    and page_title
+                    and page_title.strip().lower() not in generic_titles
+                ):
+                    normalized["page_title"] = page_title
+                if not normalized.get("page_title"):
+                    normalized["page_title"] = page_title
+                return normalized
 
         except Exception:
             # Browser debugging unavailable, malformed response, etc.

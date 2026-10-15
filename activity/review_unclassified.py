@@ -32,7 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.classification_learning import (
-    extract_keywords, add_project_keywords, add_distraction_keywords,
+    extract_keywords, add_project_keywords, add_distraction_keywords, add_topic_rule,
     add_project_workspace, add_project_vault,
 )
 from core.llm_client import LLMClient
@@ -42,6 +42,7 @@ from core.project_matcher import (
 )
 from core.review_queue import find_review_items
 from core.sessionizer import _fetch_events, _event_context  # reuse, not duplicate
+from core.topic_matcher import DEFAULT_TOPICS_PATH
 
 
 def _apply_learning(label: str, item) -> None:
@@ -119,8 +120,12 @@ def _prompt_for_item(item, project_names: list[str], llm_checked: bool = False) 
     for i, name in enumerate(project_names, start=1):
         print(f"  [{i}] Add to \"{name}\"")
 
-    print(f"  [N] Add to a new project")
+    if item.workspace:
+        print(f"  [N] Confirm this workspace as a new project ({item.workspace})")
+    else:
+        print(f"  [N] Add to a new project")
     print(f"  [D] Distraction")
+    print(f"  [T] Learning/personal topic")
     print(f"  [I] Ignore (skip, don't classify)")
     print()
 
@@ -135,8 +140,23 @@ def _prompt_for_item(item, project_names: list[str], llm_checked: bool = False) 
         print(f"  → Marked as Distraction. Learned keywords: {keywords or '(none found)'}")
         return
 
+    if choice == "t":
+        topic = input("  Topic name (for example AI/ML): ").strip()
+        category = input("  Category [Learning/Research/Entertainment/Other] (Learning): ").strip().title() or "Learning"
+        if not topic or category not in {"Learning", "Research", "Entertainment", "Other"}:
+            print("  → Invalid topic or category, skipped.")
+            return
+        apply_domain = input(f"  Learn all future visits to {item.domain or 'this site'}? [Y/n]: ").strip().lower() != "n"
+        domains = [item.domain] if apply_domain and item.domain else []
+        keywords = [] if domains else extract_keywords(item.label, existing_keywords=set())
+        add_topic_rule(DEFAULT_TOPICS_PATH, topic, category, domains=domains, keywords=keywords)
+        print(f"  → Learned {topic} as {category}. Future matching uses this explicit rule.")
+        return
+
     if choice == "n":
-        new_name = input("  New project name: ").strip()
+        default_name = item.workspace or ""
+        suffix = f" [{default_name}]" if default_name else ""
+        new_name = input(f"  New project name{suffix}: ").strip() or default_name
         if not new_name:
             print("  → No name given, skipped.")
             return

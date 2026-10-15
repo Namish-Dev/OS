@@ -1,0 +1,15 @@
+[Unit]
+Description=Personal OS activity tracker
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory={{PROJECT_ROOT}}
+ExecStart={{PYTHON}} activity/activity_tracker.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

@@ -12,6 +12,9 @@
         "extension_adapter",
         "sessionizer",
         "linux"
+      ],
+      "workspaces": [
+        "OS"
       ]
     },
     {
@@ -21,7 +24,22 @@
         "auth.py",
         "jwt",
         "oauth2",
-        "dependency injection"
+        "dependency injection",
+        "react",
+        "login",
+        "screen"
+      ]
+    },
+    {
+      "name": "RAG",
+      "keywords": [
+        "building",
+        "next",
+        "log",
+        "macos-rag-finder"
+      ],
+      "workspaces": [
+        "macos-rag-finder"
       ]
     }
   ]

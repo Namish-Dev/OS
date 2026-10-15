@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from core.activity_classifier import classify_event
 from core.project_matcher import ProjectMatcher, CONFIDENCE_NONE
+from core.topic_matcher import TopicMatcher
 
 
 @dataclass
@@ -112,6 +113,7 @@ def find_review_items(
     events: list[dict],
     matcher: ProjectMatcher,
     context_fn,
+    topic_matcher: TopicMatcher | None = None,
 ) -> list[ReviewItem]:
     """
     Args:
@@ -128,11 +130,34 @@ def find_review_items(
     """
 
     items_by_signature: dict[str, ReviewItem] = {}
+    topic_matcher = topic_matcher or TopicMatcher()
+
+    # Find unconfirmed workspaces before inspecting browser items. A local
+    # preview named after one of these workspaces is evidence for that same
+    # one-time project question, not a second item to review.
+    proposed_workspaces: set[str] = set()
+    for event in events:
+        context = context_fn(event)
+        workspace = (context.get("workspace") or "").strip()
+        if not workspace:
+            continue
+        _label, confidence = matcher.match_with_confidence(event.get("window_title"), context)
+        if confidence == CONFIDENCE_NONE:
+            proposed_workspaces.add(workspace.lower())
 
     for event in events:
 
         context = context_fn(event)
         application = event.get("application")
+
+        # VS Code's welcome tab is application chrome, not a project file and
+        # never gives the user a useful classification question.
+        if (
+            (application or "").lower() == "visual studio code"
+            and (context.get("file") or "").strip().lower() in {"welcome", "getting started"}
+            and not context.get("workspace")
+        ):
+            continue
 
         if _is_uninformative_title(context.get("page_title"), context.get("domain")):
             continue
@@ -144,7 +169,31 @@ def find_review_items(
         if confidence != CONFIDENCE_NONE:
             continue
 
+        if topic_matcher.match(context):
+            continue
+
+        browser_text = " ".join(str(context.get(key) or "") for key in ("page_title", "url"))
+        if not context.get("workspace") and any(name in browser_text.lower() for name in proposed_workspaces):
+            continue
+
         category = classify_event(application, context)
+
+        # The workspace is the unit the user recognises as a project. Ask
+        # once about it before asking about any filenames inside it.
+        workspace = (context.get("workspace") or "").strip()
+        if workspace:
+            signature = f"workspace::{workspace.lower()}"
+            if signature not in items_by_signature:
+                items_by_signature[signature] = ReviewItem(
+                    signature=signature,
+                    label=workspace,
+                    kind="VS Code workspace",
+                    category="Coding",
+                    workspace=workspace,
+                )
+            items_by_signature[signature].event_ids.append(event["id"])
+            continue
+
         signature = build_signature(application, context)
 
         if signature == "unknown":

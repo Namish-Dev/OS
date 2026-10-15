@@ -38,21 +38,21 @@ class TestClassifyEvent:
     def test_file_explorer_is_files(self):
         assert classify_event("File Explorer", {"path": "C:\\Projects"}) == FILES
 
-    def test_github_domain_is_research(self):
+    def test_github_domain_is_unclassified_without_a_user_rule(self):
         result = classify_event("Google Chrome", {"domain": "github.com"})
-        assert result == RESEARCH
+        assert result == OTHER
 
-    def test_youtube_domain_is_learning(self):
+    def test_youtube_domain_is_unclassified_without_a_user_rule(self):
         result = classify_event("Google Chrome", {"domain": "youtube.com"})
-        assert result == LEARNING
+        assert result == OTHER
 
-    def test_gmail_domain_is_communication(self):
+    def test_gmail_domain_is_unclassified_without_a_user_rule(self):
         result = classify_event("Google Chrome", {"domain": "mail.google.com"})
-        assert result == COMMUNICATION
+        assert result == OTHER
 
-    def test_reddit_domain_is_entertainment(self):
+    def test_reddit_domain_is_unclassified_without_a_user_rule(self):
         result = classify_event("Google Chrome", {"domain": "reddit.com"})
-        assert result == ENTERTAINMENT
+        assert result == OTHER
 
     def test_unknown_domain_is_other(self):
         result = classify_event("Google Chrome", {"domain": "some-random-site.com"})
@@ -452,4 +452,4 @@ class TestSessionizer:
         assert "Project: FastAPI Authentication" in summary
         assert "Files: auth.py" in summary
         assert "coding" in summary.lower()
-        assert "research" in summary.lower()
+        assert "other" in summary.lower()

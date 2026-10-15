@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import activity.review_unclassified as review_cli
 from core.project_matcher import DISTRACTION
+from core.review_queue import find_review_items
 
 
 def _tmp_configs():
@@ -141,3 +142,22 @@ class TestApplyLearning:
 
         data = json.loads(distractions_path.read_text())
         assert "youtube" not in [k.lower() for k in data.get("keywords", [])]
+
+
+def test_unconfirmed_workspace_is_one_review_question_not_a_question_per_file():
+    matcher = review_cli.ProjectMatcher(config_path=_tmp_configs()[0], distractions_path=_tmp_configs()[1])
+    events = [
+        {"id": 1, "application": "Visual Studio Code", "window_title": "App.jsx - macos-rag-finder - Visual Studio Code",
+         "workspace": "macos-rag-finder", "file": "App.jsx", "note": None, "vault": None,
+         "domain": None, "url": None, "page_title": None, "path": None},
+        {"id": 2, "application": "Visual Studio Code", "window_title": "main.py - macos-rag-finder - Visual Studio Code",
+         "workspace": "macos-rag-finder", "file": "main.py", "note": None, "vault": None,
+         "domain": None, "url": None, "page_title": None, "path": None},
+    ]
+
+    items = find_review_items(events, matcher, context_fn=lambda event: event)
+
+    assert len(items) == 1
+    assert items[0].kind == "VS Code workspace"
+    assert items[0].label == "macos-rag-finder"
+    assert items[0].event_ids == [1, 2]

@@ -56,7 +56,7 @@ def classify_application(process_name: str | None) -> str:
     if not process_name:
         return "Unknown"
 
-    return APPLICATION_MAP.get(process_name, process_name)
+    return APPLICATION_MAP.get(process_name, APPLICATION_MAP.get(process_name.lower(), process_name))
 
 
 def is_browser(process_name: str | None) -> bool:
@@ -65,4 +65,4 @@ def is_browser(process_name: str | None) -> bool:
     if not process_name:
         return False
 
-    return process_name in BROWSER_PROCESSES
+    return process_name in BROWSER_PROCESSES or process_name.lower() in BROWSER_PROCESSES

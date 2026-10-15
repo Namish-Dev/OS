@@ -19,6 +19,7 @@ and never touches how events are recorded (Phase 1 is untouched).
 Platform-independent.
 """
 
+import json
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -135,9 +136,14 @@ class Session:
         ]
 
 
-def _fetch_events(limit: int | None = None) -> list[dict]:
+def _fetch_events(limit: int | None = None, since: str | None = None, until: str | None = None) -> list[dict]:
     """
     Fetch events joined with their context, oldest first.
+
+    Args:
+        limit: Only consider the most recent N events.
+        since: ISO timestamp lower bound (inclusive), e.g. a day's start.
+        until: ISO timestamp upper bound (exclusive), e.g. next day's start.
 
     Returns a flat list of dicts merging activity_events and
     activity_context columns.
@@ -146,31 +152,42 @@ def _fetch_events(limit: int | None = None) -> list[dict]:
     connection = get_connection()
     cursor = connection.cursor()
 
-    query = """
+    # Older databases and lightweight test fixtures predate metadata_json.
+    # Read them faithfully with an empty metadata slot rather than failing.
+    cursor.execute("PRAGMA table_info(activity_context)")
+    context_columns = {row[1] for row in cursor.fetchall()}
+    metadata_column = "c.metadata_json" if "metadata_json" in context_columns else "NULL"
+
+    query = f"""
         SELECT
             e.id, e.timestamp, e.application, e.process, e.window_title,
             c.workspace, c.file, c.note, c.vault, c.domain, c.url,
-            c.page_title, c.path
+            c.page_title, c.path, {metadata_column}
         FROM activity_events e
         LEFT JOIN activity_context c ON c.activity_event_id = e.id
-        ORDER BY e.id ASC
+        WHERE 1=1
     """
 
-    if limit:
-        # Grab the most recent N by id, then we'll already have them
-        # ascending since we sort ASC — simplest is to fetch all then
-        # slice, since activity tables are not expected to be huge
-        # in Phase 1/2. Revisit with pagination if this becomes slow.
-        pass
+    params: list[str] = []
 
-    cursor.execute(query)
+    if since:
+        query += " AND e.timestamp >= ?"
+        params.append(since)
+
+    if until:
+        query += " AND e.timestamp < ?"
+        params.append(until)
+
+    query += " ORDER BY e.id ASC"
+
+    cursor.execute(query, params)
     rows = cursor.fetchall()
     connection.close()
 
     columns = [
         "id", "timestamp", "application", "process", "window_title",
         "workspace", "file", "note", "vault", "domain", "url",
-        "page_title", "path",
+        "page_title", "path", "metadata_json",
     ]
 
     events = [dict(zip(columns, row)) for row in rows]
@@ -184,7 +201,7 @@ def _fetch_events(limit: int | None = None) -> list[dict]:
 def _event_context(event: dict) -> dict:
     """Extract the context-shaped sub-dict from a flat event row."""
 
-    return {
+    context = {
         "workspace": event.get("workspace"),
         "file": event.get("file"),
         "note": event.get("note"),
@@ -194,6 +211,13 @@ def _event_context(event: dict) -> dict:
         "page_title": event.get("page_title"),
         "path": event.get("path"),
     }
+    try:
+        metadata = json.loads(event.get("metadata_json") or "{}")
+    except (TypeError, ValueError):
+        metadata = {}
+    if isinstance(metadata, dict):
+        context.update(metadata)
+    return context
 
 
 def _resource_for_event(category: str, context: dict) -> tuple[str, str] | None:

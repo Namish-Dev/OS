@@ -177,3 +177,28 @@ def add_distraction_keywords(config_path: Path, new_keywords: list[str]) -> None
             existing.add(kw.lower())
 
     save_json(config_path, data)
+
+
+def add_topic_rule(
+    config_path: Path,
+    topic_name: str,
+    category: str,
+    domains: list[str] | None = None,
+    keywords: list[str] | None = None,
+) -> None:
+    """Save an explicit user-confirmed topic rule without changing projects."""
+    data = load_json(config_path)
+    topics = data.setdefault("topics", [])
+    for topic in topics:
+        if topic.get("name", "").lower() == topic_name.lower() and topic.get("category") == category:
+            for field, values in (("domains", domains or []), ("keywords", keywords or [])):
+                existing = {str(value).lower() for value in topic.get(field, [])}
+                target = topic.setdefault(field, [])
+                for value in values:
+                    if value and value.lower() not in existing:
+                        target.append(value)
+                        existing.add(value.lower())
+            break
+    else:
+        topics.append({"name": topic_name, "category": category, "domains": list(domains or []), "keywords": list(keywords or [])})
+    save_json(config_path, data)

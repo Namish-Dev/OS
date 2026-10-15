@@ -72,6 +72,7 @@ class TestCreateDatabase:
                 cursor.execute("PRAGMA table_info(activity_context)")
                 columns = {row[1] for row in cursor.fetchall()}
                 assert "path" in columns
+                assert "metadata_json" in columns
 
                 conn.close()
 
@@ -252,6 +253,29 @@ class TestSaveActivityEvent:
         finally:
             tmp_path.unlink(missing_ok=True)
 
+    def test_preserves_extra_context_as_json_metadata(self):
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            tmp_path = Path(f.name)
+
+        try:
+            with patch("database.database.DATABASE_PATH", tmp_path):
+                create_database()
+                event_id = save_activity_event(ActivityEvent(
+                    timestamp="2026-08-27T15:05:00",
+                    application="Visual Studio Code",
+                    process="code",
+                    window_title="main.py - OS - Visual Studio Code",
+                    context={"file": "main.py", "hyprland_address": "0x123", "window_pid": 42},
+                ))
+                conn = sqlite3.connect(tmp_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT metadata_json FROM activity_context WHERE activity_event_id = ?", (event_id,))
+                assert cursor.fetchone()[0] == '{"hyprland_address": "0x123", "window_pid": 42}'
+                conn.close()
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
     def test_save_antigravity_context(self):
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -293,4 +317,3 @@ class TestSaveActivityEvent:
 
         finally:
             tmp_path.unlink(missing_ok=True)
-

@@ -32,7 +32,10 @@ DEFAULT_PORT = 9333
 
 # How long a reported tab is considered "fresh" before we treat it
 # as stale (e.g. the extension was disabled, or the browser closed).
-FRESHNESS_SECONDS = 5.0
+# Keep the last active-tab report available for heartbeat observations. Tab
+# changes are reported immediately by the extension, so this does not merge
+# tabs; it only avoids losing URL context between tracker polls.
+FRESHNESS_SECONDS = 120.0
 
 
 class _SharedTabState:

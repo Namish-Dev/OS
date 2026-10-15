@@ -7,6 +7,7 @@ Every module must use get_connection() or DATABASE_PATH from this file.
 Do NOT create additional .db files anywhere in the project.
 """
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -63,6 +64,13 @@ def create_database():
     # Add 'path' column to activity_context for File Explorer paths
     _migrate_add_column(
         cursor, "activity_context", "path", "TEXT"
+    )
+
+    # Preserves new, structured collector facts without requiring a schema
+    # migration for every source. Sensitive values must be filtered by the
+    # collector before reaching this boundary.
+    _migrate_add_column(
+        cursor, "activity_context", "metadata_json", "TEXT"
     )
 
     connection.commit()
@@ -153,8 +161,8 @@ def save_activity_event(event) -> int:
             cursor.execute("""
                 INSERT INTO activity_context
                 (activity_event_id, application, workspace, file,
-                 note, vault, domain, url, page_title, path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 note, vault, domain, url, page_title, path, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 event_id,
                 app_name,
@@ -166,6 +174,13 @@ def save_activity_event(event) -> int:
                 ctx.get("url"),
                 page_title,
                 ctx.get("path"),
+                json.dumps({
+                    key: value for key, value in ctx.items()
+                    if key not in {
+                        "workspace", "file", "note", "vault", "domain",
+                        "url", "page_title", "title", "path",
+                    } and value is not None
+                }, ensure_ascii=True, sort_keys=True),
             ))
 
         connection.commit()

@@ -121,6 +121,39 @@ class TestProcessObservation:
         assert event.application == "Unknown"
         assert event.process == "unknown"
 
+    @patch("core.activity_engine.save_activity_event")
+    def test_sensor_context_fills_missing_workspace(self, mock_save):
+        engine = ActivityEngine()
+
+        event = engine.process_observation(
+            "code",
+            "Welcome - Visual Studio Code",
+            {"workspace": "work", "window_pid": 1234},
+        )
+
+        assert event.context["workspace"] == "work"
+        assert event.context["window_pid"] == 1234
+
+    @patch("core.activity_engine.save_activity_event")
+    def test_vscode_extension_and_git_context_are_enriched(self, mock_save):
+        adapter = MagicMock()
+        adapter.get_context.return_value = {
+            "workspace": "personal-agent",
+            "workspace_path": "/home/user/Projects/personal-agent",
+            "file": "context.py",
+            "language": "python",
+        }
+        git = MagicMock()
+        git.collect.return_value = {"git": {"branch": "context-engine", "modified_files": 4}}
+        engine = ActivityEngine(vscode_adapter=adapter, git_collector=git)
+
+        event = engine.process_observation("code", "Welcome - Visual Studio Code")
+
+        assert event.context["workspace_path"] == "/home/user/Projects/personal-agent"
+        assert event.context["file"] == "context.py"
+        assert event.context["git"]["branch"] == "context-engine"
+        git.collect.assert_called_once_with("/home/user/Projects/personal-agent")
+
 
 class TestBrowserEnrichment:
 

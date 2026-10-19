@@ -50,6 +50,7 @@ class WindowsForegroundSensor(ForegroundSensor):
             "window_title": window_title,
             "window_class": self._get_window_class(hwnd),
             "hwnd": hwnd,
+            "pid": process_id,
         }
 
     # ---- Win32 wrappers ---------------------------------------------------

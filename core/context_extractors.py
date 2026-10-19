@@ -5,8 +5,9 @@ Pure functions that parse window titles into structured context dicts.
 No OS-specific dependencies — only string operations.
 """
 
+import os
 import re
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 
 # ---------------------------------------------------------------------------
@@ -56,18 +57,6 @@ def parse_antigravity_title(window_title: str | None) -> dict:
         "Antigravity IDE - <File>"
         "<File> - Antigravity IDE"
         "Antigravity IDE"
-
-    Examples:
-        "OS - Antigravity IDE - view.py"
-            → {"file": "view.py", "workspace": "OS"}
-        "OS - Antigravity IDE - Walkthrough"
-            → {"file": "Walkthrough", "workspace": "OS"}
-        "OS - Antigravity IDE"
-            → {"file": None, "workspace": "OS"}
-        "Antigravity IDE - view.py"
-            → {"file": "view.py", "workspace": None}
-        "Antigravity IDE"
-            → {"file": None, "workspace": None}
     """
 
     if not window_title:
@@ -111,9 +100,8 @@ def parse_antigravity_title(window_title: str | None) -> dict:
     return {"file": None, "workspace": None}
 
 
-
 # ---------------------------------------------------------------------------
-# Obsidian  (version-agnostic)
+# Obsidian (version-agnostic)
 # ---------------------------------------------------------------------------
 
 _OBSIDIAN_SUFFIX_RE = re.compile(r"\s*-\s*Obsidian[\s\d.]*$")
@@ -159,11 +147,6 @@ def parse_explorer_title(window_title: str | None) -> dict:
     Extract the current folder/path from a File Explorer window title.
 
     The title is usually just the folder name or path.
-
-    Examples:
-        "Downloads"   → {"path": "Downloads"}
-        "OS"          → {"path": "OS"}
-        ""            → {"path": None}
     """
 
     if not window_title:
@@ -200,7 +183,7 @@ def strip_browser_suffix(window_title: str | None) -> str | None:
     Remove the browser name suffix from a window title.
 
     "GitHub - Google Chrome" → "GitHub"
-    "YouTube - Brave"       → "YouTube"
+    "YouTube - Brave"        → "YouTube"
     """
 
     if not window_title:
@@ -216,8 +199,15 @@ def strip_browser_suffix(window_title: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# URL / domain helpers
+# URL / domain helpers & privacy sanitization
 # ---------------------------------------------------------------------------
+
+_SENSITIVE_PARAM_SUBSTRINGS = {
+    "token", "auth", "password", "passwd", "secret",
+    "api_key", "apikey", "access_token", "refresh_token",
+    "code", "session", "sessionid", "sess",
+}
+
 
 def extract_domain(url: str | None) -> str | None:
     """
@@ -250,6 +240,52 @@ def extract_domain(url: str | None) -> str | None:
         hostname = hostname[4:]
 
     return hostname
+
+
+def sanitize_url(url: str | None, strip_all_query: bool | None = None) -> str | None:
+    """
+    Sanitize URL by removing sensitive query parameters or all query parameters.
+    Respects OS_STRIP_URL_QUERY environment variable when strip_all_query is None.
+    Always removes sensitive authentication, token, and secret parameters.
+    """
+
+    if not url:
+        return None
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return url
+
+    if is_internal_url(url):
+        return url
+
+    should_strip_all = (
+        strip_all_query
+        if strip_all_query is not None
+        else (os.getenv("OS_STRIP_URL_QUERY", "0").lower() in ("1", "true", "yes"))
+    )
+
+    if should_strip_all or not parsed.query:
+        query = ""
+    else:
+        # Filter out sensitive tokens/secrets
+        clean_params = []
+        for k, v in parse_qsl(parsed.query, keep_blank_values=True):
+            k_lower = k.lower()
+            if any(sensitive in k_lower for sensitive in _SENSITIVE_PARAM_SUBSTRINGS):
+                continue
+            clean_params.append((k, v))
+        query = urlencode(clean_params)
+
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        query,
+        "",  # Strip URL fragment to prevent leaking fragment tokens
+    ))
 
 
 def is_internal_url(url: str | None) -> bool:

@@ -25,5 +25,6 @@ def test_adapter_normalizes_extension_context_to_safe_event_fields():
         "workspace": "personal-agent",
         "workspace_path": "/home/user/Projects/personal-agent",
         "file": "context.py",
+        "file_path": "/home/user/Projects/personal-agent/core/context.py",
         "language": "python",
     }

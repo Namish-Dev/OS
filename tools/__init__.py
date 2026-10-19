@@ -1,1 +1,0 @@
-"""Permission-controlled assistant tools."""

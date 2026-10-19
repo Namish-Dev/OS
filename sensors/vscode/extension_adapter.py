@@ -18,5 +18,6 @@ class VSCodeExtensionAdapter:
             "workspace": report.get("workspace"),
             "workspace_path": report.get("workspace_path"),
             "file": Path(file_path).name if file_path else None,
+            "file_path": file_path,
             "language": report.get("language"),
         }
